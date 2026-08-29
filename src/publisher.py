@@ -438,25 +438,42 @@ class ToutiaoPublisher:
                 if '完成后无法继续编辑' in body or '是否确定完成' in body:
                     log.info(f"检测到确认对话框 (第{i+1}秒)")
                     
-                    # 找到所有"确定"按钮, 用鼠标点击位置在页面中间的那个
-                    all_btns = self._page.query_selector_all("button:has-text('确定')")
-                    for btn in all_btns:
-                        try:
-                            box = btn.bounding_box()
-                            if box and box['width'] > 0:
-                                # 确认对话框的确定按钮在页面中间 (y < 700)
-                                if box['y'] < 700:
-                                    cx, cy = box['x'] + box['width']/2, box['y'] + box['height']/2
-                                    log.info(f"用鼠标点击确认对话框的确定: ({cx:.0f}, {cy:.0f})")
-                                    self._page.mouse.click(cx, cy)
-                                    time.sleep(3)
-                                    break
-                        except:
-                            pass
+                    # 方法1: 用JS找到确认对话框中的确定按钮并点击
+                    result = self._page.evaluate("""() => {
+                        // 找到所有包含"确定"文字的按钮
+                        const btns = document.querySelectorAll('button');
+                        const confirmBtns = [];
+                        for (const btn of btns) {
+                            const text = (btn.innerText || btn.textContent || '').trim();
+                            if (text === '确定') {
+                                const rect = btn.getBoundingClientRect();
+                                confirmBtns.push({
+                                    x: rect.x, y: rect.y, 
+                                    width: rect.width, height: rect.height,
+                                    visible: rect.width > 0
+                                });
+                            }
+                        }
+                        // 按y坐标排序, 点击最上面的那个(确认对话框的确定在页面中间)
+                        confirmBtns.sort((a, b) => a.y - b.y);
+                        if (confirmBtns.length > 0 && confirmBtns[0].visible) {
+                            const btn = confirmBtns[0];
+                            return {clicked: true, x: btn.x + btn.width/2, y: btn.y + btn.height/2, all: confirmBtns};
+                        }
+                        return {clicked: false, all: confirmBtns};
+                    }""")
+                    
+                    if result.get('clicked'):
+                        cx, cy = result['x'], result['y']
+                        log.info(f"用鼠标点击确认对话框的确定: ({cx:.0f}, {cy:.0f})")
+                        log.info(f"所有确定按钮位置: {[(b['x'], b['y']) for b in result.get('all', [])]}")
+                        self._page.mouse.click(cx, cy)
+                        # 等待更长时间让封面应用
+                        time.sleep(5)
                     break
             
             # 8. 等待封面应用
-            time.sleep(3)
+            time.sleep(5)
             body = self._page.evaluate('() => document.body.innerText')
             if '上传封面' in body:
                 log.warning("封面可能未应用, 仍显示'上传封面'")
