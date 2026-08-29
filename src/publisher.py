@@ -225,20 +225,9 @@ class ToutiaoPublisher:
             if self.auto_handle_declaration:
                 self._handle_declaration_popup()
 
-            # 7. 设置封面 (自动从视频截取一帧)
+            # 7. 设置封面 (点击上传封面, 然后直接点下一步使用视频第一帧)
             if self.cover_mode == "auto":
-                import subprocess
-                cover_path = f"/tmp/cover_{idx}.jpg"
-                try:
-                    subprocess.run([
-                        "ffmpeg", "-y", "-i", filepath,
-                        "-ss", "00:00:03", "-vframes", "1",
-                        "-q:v", "2", cover_path
-                    ], capture_output=True, timeout=30)
-                    if Path(cover_path).exists():
-                        self._set_cover_auto(cover_path)
-                except Exception as e:
-                    log.warning(f"截取封面失败: {e}")
+                self._set_cover_auto()
 
             # 8. 点击发布并验证结果
             publish_success = self._click_publish()
@@ -363,40 +352,156 @@ class ToutiaoPublisher:
             log.debug(f"设置作品声明异常: {e}")
 
     def _set_cover_auto(self, cover_path: str = ""):
-        """上传封面并处理裁剪弹窗"""
+        """设置封面: 点击上传封面触发弹窗, 等待解析完成, 然后点击下一步(div元素)"""
         try:
-            if not cover_path or not Path(cover_path).exists():
-                log.warning("封面文件不存在, 跳过封面上传")
-                return
-            
-            # 点击上传封面区域
+            # 点击上传封面区域, 触发封面截取弹窗
             upload_cover = self._page.query_selector("text=上传封面")
             if upload_cover:
                 upload_cover.click()
+                time.sleep(3)
+                log.info("已点击上传封面, 等待封面截取弹窗...")
+            else:
+                log.warning("未找到上传封面按钮")
+                return
+            
+            # 等待弹窗出现
+            time.sleep(3)
+            
+            # 等待封面解析完成 ("解析中"消失, 或下一步按钮变为可点击)
+            log.info("等待封面解析完成...")
+            for wait_i in range(30):  # 最多等待60秒
                 time.sleep(2)
-            
-            # 上传封面文件 (用最后一个file input)
-            file_inputs = self._page.query_selector_all("input[type='file']")
-            if file_inputs:
-                file_inputs[-1].set_input_files(cover_path)
-                log.info(f"已上传封面: {Path(cover_path).name}")
-                time.sleep(5)
-            
-            # 处理裁剪弹窗 - 点击确定/完成
-            for btn in self._page.query_selector_all("button"):
                 try:
-                    text = btn.inner_text().strip()
-                    if text in ["确定", "完成", "确认", "保存"]:
-                        btn.click()
-                        log.info("已点击封面裁剪确认")
-                        time.sleep(2)
+                    # 检查是否还有"解析中"
+                    body_text = self._page.evaluate('() => document.body.innerText')
+                    if '解析中' not in body_text:
+                        log.info(f"封面解析完成 (第{(wait_i+1)*2}秒)")
                         break
+                    
+                    # 检查下一步按钮是否变为可点击 (class不含cannot-click)
+                    btn_info = self._page.evaluate('''() => {
+                        const divs = document.querySelectorAll('div');
+                        for (const d of divs) {
+                            const text = (d.innerText || d.textContent || '').trim();
+                            if (text === '下一步' && d.className.includes('m-button')) {
+                                return {className: d.className, visible: d.offsetParent !== null};
+                            }
+                        }
+                        return null;
+                    }''')
+                    if btn_info and 'cannot-click' not in btn_info['className']:
+                        log.info(f"下一步按钮已可点击 (第{(wait_i+1)*2}秒)")
+                        break
+                    
+                    if wait_i % 5 == 0:
+                        log.info(f"  仍在解析中... (第{(wait_i+1)*2}秒)")
                 except:
                     pass
             
-            # 按ESC关闭可能的弹窗
-            self._page.keyboard.press("Escape")
-            time.sleep(1)
+            # 点击"下一步"按钮 (是div元素, 不是button)
+            for attempt in range(5):
+                clicked = self._page.evaluate('''() => {
+                    const divs = document.querySelectorAll('div');
+                    for (const d of divs) {
+                        const text = (d.innerText || d.textContent || '').trim();
+                        if (text === '下一步' && d.className.includes('m-button')) {
+                            if (!d.className.includes('cannot-click')) {
+                                d.scrollIntoView();
+                                d.click();
+                                return 'clicked';
+                            }
+                            return 'disabled';
+                        }
+                    }
+                    return 'not_found';
+                }''')
+                
+                if clicked == 'clicked':
+                    log.info(f"已点击封面弹窗'下一步'按钮 (第{attempt+1}次尝试)")
+                    time.sleep(3)
+                    break
+                elif clicked == 'disabled':
+                    log.info(f"下一步按钮仍禁用, 等待... (第{attempt+1}次尝试)")
+                    time.sleep(3)
+                else:
+                    log.warning(f"未找到下一步按钮 (第{attempt+1}次尝试)")
+                    time.sleep(2)
+            
+            # 检查弹窗是否关闭
+            time.sleep(3)
+            try:
+                body_text = self._page.evaluate('() => document.body.innerText')
+                if '封面截取' in body_text or '本地上传' in body_text:
+                    log.warning("封面弹窗仍存在, 尝试用鼠标点击右下角...")
+                    self._page.mouse.click(1050, 780)
+                    time.sleep(3)
+            except:
+                pass
+            
+            # 处理"封面编辑"弹窗 (点击下一步后会弹出, 有文字/贴纸/滤镜编辑)
+            log.info("检查封面编辑弹窗...")
+            for edit_attempt in range(5):
+                try:
+                    body_text = self._page.evaluate('() => document.body.innerText')
+                    if '封面编辑' in body_text or '添加文字' in body_text:
+                        log.info(f"检测到封面编辑弹窗, 点击'确定'按钮 (第{edit_attempt+1}次)...")
+                        
+                        # 方法1: 用Playwright原生方法点击"确定"按钮
+                        clicked = False
+                        try:
+                            confirm_btn = self._page.wait_for_selector("button:has-text('确定')", timeout=5000)
+                            if confirm_btn and confirm_btn.is_visible():
+                                confirm_btn.click()
+                                log.info("Playwright原生点击'确定'按钮成功")
+                                clicked = True
+                                time.sleep(3)
+                        except Exception as e:
+                            log.debug(f"Playwright点击'确定'失败: {e}")
+                        
+                        # 方法2: 用JS点击
+                        if not clicked:
+                            clicked = self._page.evaluate('''() => {
+                                const btns = document.querySelectorAll('button');
+                                for (const btn of btns) {
+                                    const text = (btn.innerText || btn.textContent || '').trim();
+                                    if (text === '确定') {
+                                        btn.scrollIntoView();
+                                        btn.click();
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            }''')
+                            if clicked:
+                                log.info("JS点击'确定'按钮成功")
+                                time.sleep(3)
+                        
+                        # 方法3: 用鼠标点击右下角位置
+                        if not clicked:
+                            log.warning("未找到'确定'按钮, 用鼠标点击右下角...")
+                            self._page.mouse.click(1050, 780)
+                            time.sleep(3)
+                        
+                        # 验证弹窗是否关闭
+                        time.sleep(2)
+                        body_text2 = self._page.evaluate('() => document.body.innerText')
+                        if '封面编辑' not in body_text2 and '添加文字' not in body_text2:
+                            log.info("封面编辑弹窗已关闭")
+                            break
+                        else:
+                            log.warning("封面编辑弹窗仍存在, 重试...")
+                    else:
+                        log.info("未检测到封面编辑弹窗")
+                        break
+                except Exception as e:
+                    log.debug(f"检查封面编辑弹窗异常: {e}")
+                    time.sleep(2)
+            
+            # 最后按ESC关闭可能残留的弹窗 (按2次)
+            for _ in range(2):
+                self._page.keyboard.press("Escape")
+                time.sleep(1)
+            log.info("封面设置完成")
             
         except Exception as e:
             log.warning(f"设置封面异常: {e}")
