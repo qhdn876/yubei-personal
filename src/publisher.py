@@ -520,6 +520,25 @@ class ToutiaoPublisher:
         
         log.info("已点击发布按钮, 等待发布结果...")
         
+        # 处理定时发布对话框 (深夜发布时头条会弹出)
+        time.sleep(2)
+        try:
+            body_text = self._page.evaluate('() => document.body.innerText')
+            if '定时发布' in body_text and '请选择当前时间后' in body_text:
+                log.info("检测到定时发布对话框, 用鼠标点击'定时发布'按钮...")
+                # 找到"定时发布"按钮的位置, 用鼠标点击
+                schedule_btn = self._page.query_selector("button:has-text('定时发布')")
+                if schedule_btn:
+                    box = schedule_btn.bounding_box()
+                    if box:
+                        cx, cy = box['x'] + box['width']/2, box['y'] + box['height']/2
+                        log.info(f"鼠标点击定时发布按钮: ({cx:.0f}, {cy:.0f})")
+                        self._page.mouse.click(cx, cy)
+                        # 等待更长时间让定时发布生效
+                        time.sleep(10)
+        except Exception as e:
+            log.debug(f"处理定时发布对话框异常: {e}")
+        
         # 验证发布结果 (最多等待30秒)
         for i in range(15):
             time.sleep(2)
@@ -528,7 +547,7 @@ class ToutiaoPublisher:
                 url = self._page.url
                 
                 # 检查成功标志
-                if '发布成功' in body_text or '提交成功' in body_text or '审核中' in body_text:
+                if '发布成功' in body_text or '提交成功' in body_text or '审核中' in body_text or '定时发布成功' in body_text or '已设置定时发布' in body_text:
                     log.info(f"✅ 发布成功! (第{(i+1)*2}秒)")
                     self._page.screenshot(path=str(Path(__file__).parent.parent / "logs" / "publish_success.png"))
                     return True
