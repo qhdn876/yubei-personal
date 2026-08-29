@@ -1,0 +1,117 @@
+scheduler:
+  enabled: true
+  daily_times:
+  - 08:00
+  - '14:00'
+  - '20:00'
+  min_interval_minutes: 30
+collector:
+  source: czgts
+  czgts:
+    base_url: https://www.czgts.cn
+    cookie: 你的创作罐头Cookie
+    max_count: 5
+    platform: 今日头条
+    article_genre: 视频
+    time_range_hours: 24
+    sort_by: 1
+  toutiao_search:
+    keywords:
+    - 生活技巧
+    max_per_keyword: 5
+filter:
+  forbidden_words:
+  - 政治
+  - 敏感
+  - 广告
+  exclude_categories:
+  - 军事
+  - 国际
+  min_duration: 15
+  max_duration: 180
+  orientation: any
+cache:
+  enabled: true
+  db_path: ./data/cache.db
+  video_parse_cache:
+    enabled: true
+    ttl_hours: 168
+  published_history:
+    enabled: true
+    retain_days: 90
+monitor:
+  enabled: true
+  watch_dir: ./videos/processed
+  min_video_threshold: 20
+  check_interval: 300
+  publish_delay: 60
+downloader:
+  output_dir: ./videos/raw
+  concurrency: 3
+  timeout: 60
+  rest_every: 20
+  rest_seconds: 15
+  empty_response_pause: 300
+  use_cache: true
+  auto_dedup: true
+  extract_strategies:
+  - playwright_dom
+  - api_bugpk
+  - api_jumengfang
+  api_endpoints:
+    bugpk: https://api.bugpk.com/video/parse?url=
+    jumengfang: https://api.jumengfang.com/parse
+    iiilab: https://api.iiilab.com/video/parse
+dedup:
+  enabled: true
+  output_dir: ./videos/processed
+  crop_ratio: 0.0
+  frame_skip: 0
+  brightness_range:
+  - -0.05
+  - 0.05
+  contrast_range:
+  - 0.95
+  - 1.05
+  speed_range:
+  - 0.97
+  - 1.03
+  watermark:
+    enabled: false
+    text: ''
+    position: bottom-right
+    font_size: 24
+    opacity: 0.3
+  gpu_acceleration: none
+publisher:
+  enabled: true
+  publish_url: https://mp.toutiao.com/profile_v4/index
+  user_data_dir: ./browser_data/toutiao
+  headless: true
+  publish_interval: 120
+  timeout: 180
+  title_prefix: ''
+  title_suffix: ''
+  auto_title:
+    enabled: false
+    template: '{original}'
+  cover: auto
+  delete_after_publish: false
+  archive_after_publish: true
+  archive_dir: ./videos/published
+  move_failed: true
+  failed_dir: ./videos/failed
+  auto_handle_declaration: true
+  toutiao:
+    cookie: 头条Cookie(首次扫码后自动保存, 也可手动填写)
+    enabled: true
+notifier:
+  wecom_webhook: ''
+  events:
+  - task_complete
+  - task_error
+logging:
+  level: INFO
+  file: ./logs/yubei.log
+  max_size_mb: 50
+  backup_count: 5

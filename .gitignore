@@ -1,0 +1,43 @@
+# 运行时生成的文件
+videos/
+logs/
+browser_data/
+data/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# 原始项目归档(太大, 不推送)
+archive/
+
+# 敏感配置(包含Cookie, 不推送)
+config/settings.yaml
+config/settings.local.yaml
+
+# 临时文件
+/tmp/
+*.tmp
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 环境变量
+.env
+.env.local
