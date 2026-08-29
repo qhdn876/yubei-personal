@@ -271,27 +271,43 @@ class ToutiaoPublisher:
             return False
 
     def _upload_video(self, filepath: str):
-        """上传视频文件"""
-        file_input = self._page.wait_for_selector("input[type='file']", timeout=15000)
-        file_input.set_input_files(filepath)
-        log.info(f"已选择文件: {Path(filepath).name}")
+        """上传视频文件 (input可能是hidden的, 用query_selector直接找)"""
+        file_input = None
+        try:
+            file_input = self._page.wait_for_selector("input[type='file']", timeout=5000, state="attached")
+        except:
+            pass
+        if not file_input:
+            file_inputs = self._page.query_selector_all("input[type='file']")
+            if file_inputs:
+                file_input = file_inputs[0]
+        if file_input:
+            file_input.set_input_files(filepath)
+            log.info(f"已选择文件: {Path(filepath).name}")
+        else:
+            raise RuntimeError("未找到文件上传input")
 
     def _wait_for_upload(self):
-        """等待视频上传完成"""
+        """等待视频上传完成 (最多5分钟)"""
         log.info("等待视频上传和转码...")
         time.sleep(5)
-        for i in range(60):
+        for i in range(150):  # 150 * 2秒 = 5分钟
             time.sleep(2)
             try:
-                progress = self._page.query_selector("[class*='progress'], [class*='uploading']")
-                if not progress:
-                    title_input = self._page.query_selector("input[placeholder*='标题'], textarea[placeholder*='标题']")
-                    if title_input:
-                        log.info("上传完成")
-                        return
+                body_text = self._page.evaluate('() => document.body.innerText')
+                # 检测上传完成的标志
+                if '上传成功' in body_text or '上传完成' in body_text or '转码完成' in body_text:
+                    log.info(f"上传完成 (第{i*2}秒)")
+                    return
+                # 检测上传进度
+                if '上传中' in body_text or '已上传' in body_text:
+                    if i % 10 == 0:
+                        idx = body_text.find('上传')
+                        progress = body_text[max(0,idx-5):idx+25].replace('\n', ' ')
+                        log.info(f"上传中 (第{i*2}秒): {progress}")
             except:
                 pass
-        log.warning("上传等待超时, 继续尝试发布")
+        log.warning("上传等待超时(5分钟), 继续尝试发布")
 
     def _fill_title(self, title: str):
         """填写视频标题"""
