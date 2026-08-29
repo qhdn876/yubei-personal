@@ -240,11 +240,15 @@ class ToutiaoPublisher:
                 except Exception as e:
                     log.warning(f"截取封面失败: {e}")
 
-            # 8. 点击发布
-            self._click_publish()
-
-            log.info(f"[{idx+1}] 发布成功: {final_title[:50]}")
-            return True
+            # 8. 点击发布并验证结果
+            publish_success = self._click_publish()
+            
+            if publish_success:
+                log.info(f"[{idx+1}] 发布成功: {final_title[:50]}")
+                return True
+            else:
+                log.error(f"[{idx+1}] 发布失败: 未检测到发布成功标志")
+                return False
 
         except Exception as e:
             log.error(f"[{idx+1}] 发布失败: {e}")
@@ -397,8 +401,8 @@ class ToutiaoPublisher:
         except Exception as e:
             log.warning(f"设置封面异常: {e}")
 
-    def _click_publish(self):
-        """点击发布按钮 (先关闭弹窗, 再用JS强制点击)"""
+    def _click_publish(self) -> bool:
+        """点击发布按钮并验证发布结果 (先关闭弹窗, 再用JS强制点击)"""
         # 先关闭所有可能的弹窗
         for _ in range(3):
             self._page.keyboard.press("Escape")
@@ -414,6 +418,9 @@ class ToutiaoPublisher:
             except:
                 pass
         
+        # 截图发布前状态
+        self._page.screenshot(path=str(Path(__file__).parent.parent / "logs" / "publish_before_click.png"))
+        
         # 用JS强制点击发布按钮
         result = self._page.evaluate('''() => {
             const btns = document.querySelectorAll('button');
@@ -426,11 +433,55 @@ class ToutiaoPublisher:
             return 'not_found';
         }''')
         
-        if result == 'clicked':
-            log.info("已点击发布按钮")
-            time.sleep(5)
-        else:
+        if result != 'clicked':
             raise RuntimeError("未找到可点击的发布按钮")
+        
+        log.info("已点击发布按钮, 等待发布结果...")
+        
+        # 验证发布结果 (最多等待30秒)
+        for i in range(15):
+            time.sleep(2)
+            try:
+                body_text = self._page.evaluate('() => document.body.innerText')
+                url = self._page.url
+                
+                # 检查成功标志
+                if '发布成功' in body_text or '提交成功' in body_text or '审核中' in body_text:
+                    log.info(f"✅ 发布成功! (第{(i+1)*2}秒)")
+                    self._page.screenshot(path=str(Path(__file__).parent.parent / "logs" / "publish_success.png"))
+                    return True
+                
+                # 检查页面跳转 (跳转到作品管理页)
+                if 'manage' in url or 'content' in url:
+                    log.info(f"✅ 页面跳转到作品管理, 发布可能成功! (第{(i+1)*2}秒)")
+                    self._page.screenshot(path=str(Path(__file__).parent.parent / "logs" / "publish_redirect.png"))
+                    return True
+                
+                # 检查错误提示
+                error_keywords = ['失败', '错误', '违规', '不符合', '请填写', '不能为空', '无法发布', '审核未通过', '包含']
+                for kw in error_keywords:
+                    if kw in body_text:
+                        idx = body_text.find(kw)
+                        error_context = body_text[max(0,idx-30):idx+50].replace('\n', ' ')
+                        log.warning(f"检测到可能的错误提示: {error_context}")
+                
+            except Exception as e:
+                log.debug(f"检查发布结果异常: {e}")
+        
+        # 超时, 截图并返回失败
+        log.warning("⚠️ 发布结果验证超时, 无法确认是否发布成功")
+        self._page.screenshot(path=str(Path(__file__).parent.parent / "logs" / "publish_timeout.png"))
+        
+        # 最后检查一次页面状态
+        try:
+            body_text = self._page.evaluate('() => document.body.innerText')
+            if '发布成功' in body_text or '提交成功' in body_text:
+                log.info("最后检查发现发布成功提示")
+                return True
+        except:
+            pass
+        
+        return False
 
     def _make_title(self, original_title: str) -> str:
         """生成最终标题"""
